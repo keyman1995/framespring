@@ -1,0 +1,261 @@
+package com.chen.springreview.factoryreview;
+
+import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.lang3.StringUtils;
+
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
+
+public class CommonBeanFactory implements BeanFactory, BeanDefinitionRegistry {
+
+    //这个是用来存放初始化的bean实例
+    private static Map<String, Object> beanMap = new ConcurrentHashMap<>();
+
+    //这个用来存放BeanDefinitionBack
+    private static Map<String, BeanDefinitionBack> beanDefinitionMap = new ConcurrentHashMap<>();
+
+
+    @Override
+    public void setBeanDefitionBack(String beanName, BeanDefinitionBack beanDefitionBack) {
+        if (!this.isContainBeanDefinitionBack(beanName)) {
+            beanDefinitionMap.put(beanName, beanDefitionBack);
+        } else {
+            throw new RuntimeException("beanName" + beanName + "已存在");
+        }
+    }
+
+    @Override
+    public BeanDefinitionBack getBeanDefinitionBack(String beanName) {
+        return beanDefinitionMap.get(beanName);
+    }
+
+    @Override
+    public boolean isContainBeanDefinitionBack(String beanName) {
+        return beanDefinitionMap.containsKey(beanName);
+    }
+
+    @Override
+    public Object getBean(String beanName) throws Exception {
+        return this.doGetBean(beanName);
+    }
+
+    private Object doGetBean(String beanName) throws Exception {
+
+        Object instance = beanMap.get(beanName);
+        if (instance != null) {
+            return instance;
+        }
+        BeanDefinitionBack beanDefinitionBack = beanDefinitionMap.get(beanName);
+        if (beanDefinitionBack != null) {
+            Class<?> beanClass = beanDefinitionBack.getBeanClass();
+            if (beanClass != null) {
+                if (StringUtils.isEmpty(beanDefinitionBack.getFactoryMethodBean())) {
+                    instance = this.newInstanceByConstructor(beanDefinitionBack);
+                } else {
+                    instance = this.newInstanceByFactoryMethod(beanDefinitionBack);
+                }
+            } else {
+                instance = this.newInstanceByFactoryBean(beanDefinitionBack);
+            }
+        } else {
+            throw new RuntimeException("BeanDefinition为空");
+        }
+
+        if (beanDefinitionBack.isSingle()) {
+            beanMap.put(beanName, instance);
+        }
+
+        if (!StringUtils.isEmpty(beanDefinitionBack.getInitMethod())) {
+            this.doInitMethod(instance, beanDefinitionBack);
+        }
+
+        return instance;
+
+    }
+
+    //获取构造函数中的参数
+    private Object[] getConstructorArgumentValues(BeanDefinitionBack beanDefinitionBack) throws Exception {
+        return this.getRealValue(beanDefinitionBack.getConstructorArgumentValues());
+    }
+
+    //确定构造函数的方法
+    private Constructor<?> determineConstructor(BeanDefinitionBack definitionBack, Object[] objects) throws Exception {
+        Constructor<?> constructor = null;
+        if (objects == null) {
+            return definitionBack.getBeanClass().getConstructor(null);
+        }
+        //对于原型bean 从第二次开始获取bean实例时，可以直接获得第一次缓存的构造方法
+        constructor = definitionBack.getConstructor();
+        if (constructor != null) {
+            return constructor;
+        }
+        //精确匹配 根据参数类型获取精确的构造方法
+        Class<?>[] paramTypes = new Class[objects.length];
+        int j = 0;
+        for (Object o : objects) {
+            paramTypes[j++] = o.getClass();
+        }
+        try {
+            constructor = definitionBack.getBeanClass().getConstructor(paramTypes);
+        } catch (Exception e) {
+            //TODO 异常不处理 只是表示没有精确匹配没有匹配到
+        }
+        if (constructor == null) {
+            //精确匹配如果没有匹配上，则需要先遍历所有构造方法。
+            //判断逻辑是 先判断参数数量相同吗，再来判断每一个参数类型相同吗
+            outer:
+            for (Constructor<?> constructor1 : definitionBack.getBeanClass().getConstructors()) {
+                Class<?>[] ptypes = constructor1.getParameterTypes();
+                if (ptypes.length == objects.length) {
+                    for (int i = 0; i < ptypes.length; i++) {
+                        if (!ptypes[i].isAssignableFrom(objects[i].getClass())) {
+                            continue outer;
+                        }
+                    }
+                    constructor = constructor1;
+                    break outer;
+                }
+            }
+        }
+
+        if (constructor != null) {
+            if (!definitionBack.isSingle()) {
+                definitionBack.setConstructor(constructor);
+            }
+        } else {
+            throw new RuntimeException("找不到对应的构造方法");
+        }
+
+        return constructor;
+    }
+
+    private Object[] getRealValue(List<?> args) throws Exception {
+        if (CollectionUtils.isEmpty(args)) {
+            return null;
+        }
+        Object[] objects = new Object[args.size()];
+
+        int i = 0;
+        Object v = null;
+        for (Object rv : args) {
+            if (rv == null) {
+                v = null;
+            } else if (rv instanceof BeanReference) {
+                v = this.doGetBean(((BeanReference) rv).getBeanName());
+            } else if (rv instanceof Object[]) {
+                //TODO 处理集合中的bean引用
+            } else if (rv instanceof Collection) {
+                //TODO 处理集合中的引用
+            } else if (rv instanceof Properties) {
+                //TODO  处理properties中的引用
+            } else if (rv instanceof Map) {
+                //TODO 处理Map中的引用
+            } else {
+                v = rv;
+            }
+            objects[i++] = v;
+        }
+
+        return objects;
+    }
+
+    //初始化bean实例
+    private void doInitMethod(Object instance, BeanDefinitionBack beanDefinitionBack) throws Exception {
+        Method method = instance.getClass().getMethod(beanDefinitionBack.getInitMethod(), null);
+        method.invoke(instance, null);
+    }
+
+    //通bean工厂容器创建bean实例
+    private Object newInstanceByFactoryBean(BeanDefinitionBack beanDefinitionBack) throws Exception {
+        Object factory = this.doGetBean(beanDefinitionBack.getBeanByFactory());
+        //获取参数
+        Object[] args =this.getRealValue(beanDefinitionBack.getConstructorArgumentValues());
+
+        Method method = this.determineFactoryMethod(beanDefinitionBack,args,factory.getClass());
+        return method.invoke(factory, args);
+    }
+
+    //通bean工厂静态方法创建bean实例
+    private Object newInstanceByFactoryMethod(BeanDefinitionBack beanDefinitionBack) throws Exception {
+        try {
+            //Method method = beanClass.getMethod(beanDefinitionBack.getFactoryMethodBean(), null);
+            //获取参数
+            Object[] args = this.getRealValue(beanDefinitionBack.getConstructorArgumentValues());
+            Method method = this.determineFactoryMethod(beanDefinitionBack,args,null);
+            return method.invoke(beanDefinitionBack.getBeanClass(), args);
+        } catch (Exception e) {
+            throw e;
+        }
+    }
+
+    private Method determineFactoryMethod(BeanDefinitionBack beanDefinitionBack, Object[] args, Class<?> type) throws Exception {
+        if(type==null){
+            type = beanDefinitionBack.getBeanClass();
+        }
+        String methodName = beanDefinitionBack.getFactoryMethodBean();
+        if(args==null){
+            return type.getMethod(methodName,null);
+        }
+        Method m = null;
+        m = beanDefinitionBack.getFactoryMethod();
+        if(m!=null){
+            return m;
+        }
+        Class[] parameTypes= new Class[args.length];
+        int j = 0;
+        for(Object p: args){
+            parameTypes[j++]=p.getClass();
+        }
+        try{
+            m = type.getMethod(methodName,parameTypes);
+        }catch (Exception e){
+
+        }
+        if(m==null){
+            outer:for(Method m1 :type.getMethods()){
+                if(!m1.getName().equals(methodName)){
+                    continue;
+                }
+                Class[] methodParame = m.getParameterTypes();
+                if(methodParame.length==args.length){
+                    for(int i=0;i<methodParame.length;i++){
+                        if(methodParame[i].isAssignableFrom(args[i].getClass())){
+                            continue outer;
+                        }
+                    }
+                    m = m1;
+                    break outer;
+                }
+            }
+        }
+        if(m!=null){
+            if(!beanDefinitionBack.isSingle()){
+                beanDefinitionBack.setFactoryMethod(m);
+            }
+            return m;
+        }else{
+            throw new RuntimeException("没有找到静态方法");
+        }
+
+    }
+
+    //构造函数直接创建bean
+    private Object newInstanceByConstructor(BeanDefinitionBack definitionBack) throws Exception {
+        try {
+            Object[] args = this.getConstructorArgumentValues(definitionBack);
+            if (args == null) {
+                return definitionBack.getBeanClass().newInstance();
+            } else {
+                return this.determineConstructor(definitionBack, args).newInstance(args);
+            }
+
+        } catch (Exception e) {
+            throw e;
+        }
+    }
+}
