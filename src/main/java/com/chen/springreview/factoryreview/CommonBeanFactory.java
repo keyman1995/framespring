@@ -4,11 +4,9 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class CommonBeanFactory implements BeanFactory, BeanDefinitionRegistry {
@@ -19,11 +17,22 @@ public class CommonBeanFactory implements BeanFactory, BeanDefinitionRegistry {
     //这个用来存放BeanDefinitionBack
     private static Map<String, BeanDefinitionBack> beanDefinitionMap = new ConcurrentHashMap<>();
 
+    //这个是用来存放class名称的list
+    private static List<String> classList = new ArrayList<>();
+
 
     @Override
     public void setBeanDefitionBack(String beanName, BeanDefinitionBack beanDefitionBack) {
         if (!this.isContainBeanDefinitionBack(beanName)) {
-            beanDefinitionMap.put(beanName, beanDefitionBack);
+            if (StringUtils.isNoneEmpty(beanName)) {
+                beanDefinitionMap.put(beanName, beanDefitionBack);
+            }
+            if (StringUtils.isNoneEmpty(beanDefitionBack.getAliasName())) {
+                beanDefinitionMap.put(beanDefitionBack.getAliasName(), beanDefitionBack);
+            }
+            if(beanDefitionBack.getBeanClass()!=null){
+                classList.add(beanDefitionBack.getBeanClass().getName());
+            }
         } else {
             throw new RuntimeException("beanName" + beanName + "已存在");
         }
@@ -42,6 +51,16 @@ public class CommonBeanFactory implements BeanFactory, BeanDefinitionRegistry {
     @Override
     public Object getBean(String beanName) throws Exception {
         return this.doGetBean(beanName);
+    }
+
+    @Override
+    public Object getBean(Class<?> beanClass) throws Exception {
+        for (Map.Entry<String, BeanDefinitionBack> beanDefinition : beanDefinitionMap.entrySet()) {
+            if (beanDefinition.getValue().getBeanClass() == beanClass) {
+                return this.doGetBean(beanDefinition.getKey());
+            }
+        }
+        return null;
     }
 
     private Object doGetBean(String beanName) throws Exception {
@@ -70,12 +89,53 @@ public class CommonBeanFactory implements BeanFactory, BeanDefinitionRegistry {
             beanMap.put(beanName, instance);
         }
 
+        this.setPropertyValue(beanDefinitionBack, instance);
+
         if (!StringUtils.isEmpty(beanDefinitionBack.getInitMethod())) {
             this.doInitMethod(instance, beanDefinitionBack);
         }
 
         return instance;
 
+    }
+
+    private void setPropertyValue(BeanDefinitionBack beanDefinitionBack, Object instance) throws Exception {
+        List<PropertyValue> propertyValues = beanDefinitionBack.getPropertyValues();
+        if (CollectionUtils.isEmpty(propertyValues)) {
+            return;
+        }
+        for (PropertyValue propertyValue : propertyValues) {
+            Field field = instance.getClass().getDeclaredField(propertyValue.getName());
+            field.setAccessible(true);
+            Object o = propertyValue.getValue();
+            Object rv = null;
+            if (o == null) {
+                rv = null;
+            } else if (o instanceof BeanReference) {
+                rv = this.getBean(((BeanReference) o).getBeanName());
+            } else if (o instanceof Object[]) {
+
+            } else if (o instanceof Collection) {
+
+            } else if (o instanceof Properties) {
+                rv = this.getValue(propertyValue.getName(), o);
+            } else if (o instanceof Map) {
+
+            } else {
+                rv = o;
+            }
+            //在所有限制的beanNames
+            List<String> limitBeanName = beanDefinitionBack.getLimitBeanClass();
+            if(!limitBeanName.contains(instance.getClass().getName())){
+                field.set(instance, rv);
+            }
+        }
+
+    }
+
+    private Object getValue(String name, Object o) {
+        Properties properties = (Properties) o;
+        return properties.getProperty(name);
     }
 
     //获取构造函数中的参数
@@ -174,9 +234,9 @@ public class CommonBeanFactory implements BeanFactory, BeanDefinitionRegistry {
     private Object newInstanceByFactoryBean(BeanDefinitionBack beanDefinitionBack) throws Exception {
         Object factory = this.doGetBean(beanDefinitionBack.getBeanByFactory());
         //获取参数
-        Object[] args =this.getRealValue(beanDefinitionBack.getConstructorArgumentValues());
+        Object[] args = this.getRealValue(beanDefinitionBack.getConstructorArgumentValues());
 
-        Method method = this.determineFactoryMethod(beanDefinitionBack,args,factory.getClass());
+        Method method = this.determineFactoryMethod(beanDefinitionBack, args, factory.getClass());
         return method.invoke(factory, args);
     }
 
@@ -186,7 +246,7 @@ public class CommonBeanFactory implements BeanFactory, BeanDefinitionRegistry {
             //Method method = beanClass.getMethod(beanDefinitionBack.getFactoryMethodBean(), null);
             //获取参数
             Object[] args = this.getRealValue(beanDefinitionBack.getConstructorArgumentValues());
-            Method method = this.determineFactoryMethod(beanDefinitionBack,args,null);
+            Method method = this.determineFactoryMethod(beanDefinitionBack, args, null);
             return method.invoke(beanDefinitionBack.getBeanClass(), args);
         } catch (Exception e) {
             throw e;
@@ -194,37 +254,38 @@ public class CommonBeanFactory implements BeanFactory, BeanDefinitionRegistry {
     }
 
     private Method determineFactoryMethod(BeanDefinitionBack beanDefinitionBack, Object[] args, Class<?> type) throws Exception {
-        if(type==null){
+        if (type == null) {
             type = beanDefinitionBack.getBeanClass();
         }
         String methodName = beanDefinitionBack.getFactoryMethodBean();
-        if(args==null){
-            return type.getMethod(methodName,null);
+        if (args == null) {
+            return type.getMethod(methodName, null);
         }
         Method m = null;
         m = beanDefinitionBack.getFactoryMethod();
-        if(m!=null){
+        if (m != null) {
             return m;
         }
-        Class[] parameTypes= new Class[args.length];
+        Class[] parameTypes = new Class[args.length];
         int j = 0;
-        for(Object p: args){
-            parameTypes[j++]=p.getClass();
+        for (Object p : args) {
+            parameTypes[j++] = p.getClass();
         }
-        try{
-            m = type.getMethod(methodName,parameTypes);
-        }catch (Exception e){
+        try {
+            m = type.getMethod(methodName, parameTypes);
+        } catch (Exception e) {
 
         }
-        if(m==null){
-            outer:for(Method m1 :type.getMethods()){
-                if(!m1.getName().equals(methodName)){
+        if (m == null) {
+            outer:
+            for (Method m1 : type.getMethods()) {
+                if (!m1.getName().equals(methodName)) {
                     continue;
                 }
                 Class[] methodParame = m.getParameterTypes();
-                if(methodParame.length==args.length){
-                    for(int i=0;i<methodParame.length;i++){
-                        if(methodParame[i].isAssignableFrom(args[i].getClass())){
+                if (methodParame.length == args.length) {
+                    for (int i = 0; i < methodParame.length; i++) {
+                        if (methodParame[i].isAssignableFrom(args[i].getClass())) {
                             continue outer;
                         }
                     }
@@ -233,12 +294,12 @@ public class CommonBeanFactory implements BeanFactory, BeanDefinitionRegistry {
                 }
             }
         }
-        if(m!=null){
-            if(!beanDefinitionBack.isSingle()){
+        if (m != null) {
+            if (!beanDefinitionBack.isSingle()) {
                 beanDefinitionBack.setFactoryMethod(m);
             }
             return m;
-        }else{
+        } else {
             throw new RuntimeException("没有找到静态方法");
         }
 

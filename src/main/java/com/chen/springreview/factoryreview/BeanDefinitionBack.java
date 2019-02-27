@@ -10,6 +10,8 @@ public interface BeanDefinitionBack {
 
     String PROTORY_SCOPE="protory";
 
+    String getAliasName();
+
     Class<?> getBeanClass();
 
     //采用静态工厂创建bean
@@ -34,6 +36,10 @@ public interface BeanDefinitionBack {
     Method getFactoryMethod();
 
     void setFactoryMethod(Method method);
+
+    List<PropertyValue> getPropertyValues();
+
+    List<String> getLimitBeanClass();
 
 
 }

@@ -27,6 +27,12 @@ public class CommonBeanDefinition implements BeanDefinitionBack {
 
     private Method factroyMethod;
 
+    private List<PropertyValue> propertyValues;
+
+    private String aliasName;
+
+    private List<String> limitBeanClass;
+
     public void setBeanClass(Class<?> beanClass) {
         this.beanClass = beanClass;
     }
@@ -59,6 +65,23 @@ public class CommonBeanDefinition implements BeanDefinitionBack {
 
     public void setConstructor(Constructor<?> constructor) {
         this.constructor = constructor;
+    }
+
+    public void setPropertyValues(List<PropertyValue> propertyValues) {
+        this.propertyValues = propertyValues;
+    }
+
+    public void setAliasName(String aliasName) {
+        this.aliasName = aliasName;
+    }
+
+    public void setLimitBeanClass(List<String> limitBeanClass) {
+        this.limitBeanClass = limitBeanClass;
+    }
+
+    @Override
+    public List<PropertyValue> getPropertyValues() {
+        return this.propertyValues;
     }
 
     @Override
@@ -111,5 +134,13 @@ public class CommonBeanDefinition implements BeanDefinitionBack {
         return this.factroyMethod;
     }
 
+    @Override
+    public String getAliasName() {
+        return this.aliasName;
+    }
 
+    @Override
+    public List<String> getLimitBeanClass() {
+        return this.limitBeanClass;
+    }
 }
