@@ -2,6 +2,9 @@ package com.chen.spring.factory;
 
 import org.apache.commons.lang3.StringUtils;
 
+import java.lang.reflect.Constructor;
+import java.util.List;
+
 public class GenericBeanDefinition implements BeanDefinitation {
 
     private Class<?> beanClass;
@@ -15,6 +18,10 @@ public class GenericBeanDefinition implements BeanDefinitation {
     private String detroyMethodName;
 
     private String scope = BeanDefinitation.SCOPE_PROTOTYPE;
+
+    private Constructor<?> constructor;
+
+    private List<Object> constructValues;
 
     @Override
     public Class<?> getBeanClass() {
@@ -76,9 +83,27 @@ public class GenericBeanDefinition implements BeanDefinitation {
         this.detroyMethodName = detroyMethodName;
     }
 
+    public void setConstructValues(List<Object> constructValues) {
+        this.constructValues = constructValues;
+    }
+
     public void setScope(String scope) {
         if(StringUtils.isNoneEmpty(scope)){
             this.scope=scope;
         }
+    }
+
+    public void setConstructor(Constructor<?> constructor) {
+        this.constructor = constructor;
+    }
+
+    @Override
+    public Constructor<?> getConstructor() {
+        return this.constructor;
+    }
+
+    @Override
+    public List<Object> getConstructValue() {
+        return this.constructValues;
     }
 }

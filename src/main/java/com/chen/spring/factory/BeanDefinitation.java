@@ -1,5 +1,8 @@
 package com.chen.spring.factory;
 
+import java.lang.reflect.Constructor;
+import java.util.List;
+
 /**
  * bean定义 告诉bean工厂如何去创建bean
  */
@@ -29,5 +32,9 @@ public interface BeanDefinitation {
 
     //释放bean需要的方法
     String getDesttoryMethodName();
+
+    Constructor<?> getConstructor();
+
+    List<Object> getConstructValue();
 
 }

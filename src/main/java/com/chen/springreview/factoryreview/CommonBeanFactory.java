@@ -1,5 +1,6 @@
 package com.chen.springreview.factoryreview;
 
+import com.chen.springreview.beanpost.BeanPostProcessor;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
@@ -19,6 +20,9 @@ public class CommonBeanFactory implements BeanFactory, BeanDefinitionRegistry {
 
     //这个是用来存放class名称的list
     private static List<String> classList = new ArrayList<>();
+
+    //这个是用来存放观察者接口的
+    private  List<BeanPostProcessor> beanPosts = Collections.synchronizedList(new ArrayList<BeanPostProcessor>());
 
 
     @Override
@@ -63,6 +67,15 @@ public class CommonBeanFactory implements BeanFactory, BeanDefinitionRegistry {
         return null;
     }
 
+    @Override
+    public void registerBeanPostProcessor(BeanPostProcessor bpp) {
+        this.beanPosts.add(bpp);
+        if(bpp instanceof BeanFactoryAware){
+            ((BeanFactoryAware) bpp).setBeanFactory(this);
+        }
+
+    }
+
     private Object doGetBean(String beanName) throws Exception {
 
         Object instance = beanMap.get(beanName);
@@ -85,9 +98,7 @@ public class CommonBeanFactory implements BeanFactory, BeanDefinitionRegistry {
             throw new RuntimeException("BeanDefinition为空");
         }
 
-        if (beanDefinitionBack.isSingle()) {
-            beanMap.put(beanName, instance);
-        }
+
 
         this.setPropertyValue(beanDefinitionBack, instance);
 
@@ -95,8 +106,22 @@ public class CommonBeanFactory implements BeanFactory, BeanDefinitionRegistry {
             this.doInitMethod(instance, beanDefinitionBack);
         }
 
+        //获取该实例的所有方法，再来判断是否是需要增强的bean
+        instance = this.applyPostProcessorAfterInitializer(instance,beanName);
+
+        if (beanDefinitionBack.isSingle()) {
+            beanMap.put(beanName, instance);
+        }
+
         return instance;
 
+    }
+
+    private Object applyPostProcessorAfterInitializer(Object bean,String beanName){
+        for(BeanPostProcessor bpp :  this.beanPosts){
+            bean = bpp.postProcessAfterInitialization(bean,beanName);
+        }
+        return bean;
     }
 
     private void setPropertyValue(BeanDefinitionBack beanDefinitionBack, Object instance) throws Exception {
@@ -139,7 +164,7 @@ public class CommonBeanFactory implements BeanFactory, BeanDefinitionRegistry {
     }
 
     //获取构造函数中的参数
-    private Object[] getConstructorArgumentValues(BeanDefinitionBack beanDefinitionBack) throws Exception {
+    public Object[] getConstructorArgumentValues(BeanDefinitionBack beanDefinitionBack) throws Exception {
         return this.getRealValue(beanDefinitionBack.getConstructorArgumentValues());
     }
 
@@ -312,7 +337,9 @@ public class CommonBeanFactory implements BeanFactory, BeanDefinitionRegistry {
             if (args == null) {
                 return definitionBack.getBeanClass().newInstance();
             } else {
-                return this.determineConstructor(definitionBack, args).newInstance(args);
+                Constructor<?> constructor = this.determineConstructor(definitionBack, args);
+                definitionBack.setConstructor(constructor);
+                return constructor.newInstance(args);
             }
 
         } catch (Exception e) {
